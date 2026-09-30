@@ -3,7 +3,7 @@ spring:
     name: agent
 
   profiles:
-    active: local
+    active: local # you can modify this to any env
 
   datasource:
     url: 
