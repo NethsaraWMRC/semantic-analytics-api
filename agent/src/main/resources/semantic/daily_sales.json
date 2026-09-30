@@ -1,0 +1,56 @@
+{
+  "dataset": "daily_sales",
+  "description": "Sales already totalled per variant per DAY. Use this for anything about a specific day or a daily trend, such as yesterday, this week, or day by day. It has no location, no order count and no cost, so use shopify_sales when the question needs those. Rows are split by financial_status and fulfillment_status.",
+  "baseTable": "daily_sales ds",
+
+  "tables": {
+    "p":  { "join": "JOIN products p ON p.shopify_product_id = ds.shopify_product_id" },
+    "pv": { "join": "JOIN product_variants pv ON pv.shopify_variant_id = ds.shopify_variant_id" }
+  },
+
+  "metrics": {
+    "revenue":        { "type": "sum", "sql": "COALESCE(ds.revenue, 0)",           "description": "Sales value after discounts and refunds" },
+    "gross_revenue":  { "type": "sum", "sql": "COALESCE(ds.gross_revenue, 0)",     "description": "Sales value before discounts and refunds" },
+    "discounts":      { "type": "sum", "sql": "COALESCE(ds.total_discounts, 0)",   "description": "Total discount given" },
+    "refunds":        { "type": "sum", "sql": "COALESCE(ds.refunded_amount, 0)",   "description": "Total amount refunded" },
+    "units_sold":     { "type": "sum", "sql": "ds.quantity_sold",                  "description": "Units sold after refunds" },
+    "gross_units":    { "type": "sum", "sql": "COALESCE(ds.gross_quantity, 0)",    "description": "Units ordered before refunds" },
+    "refunded_units": { "type": "sum", "sql": "COALESCE(ds.refunded_quantity, 0)", "description": "Units refunded" },
+
+    "product_count":  { "type": "count_distinct", "sql": "ds.shopify_product_id", "description": "How many different products sold" },
+    "variant_count":  { "type": "count_distinct", "sql": "ds.shopify_variant_id", "description": "How many different variants sold" },
+
+    "average_unit_price": { "type": "ratio", "numerator": "gross_revenue", "denominator": "gross_units",
+      "description": "Average price paid per unit before discounts" }
+  },
+
+  "dimensions": {
+    "product":            { "sql": "p.title",                "description": "Product name" },
+    "product_type":       { "sql": "p.product_type",         "description": "Product category as set in Shopify" },
+    "vendor":             { "sql": "p.vendor",               "description": "Brand or supplier of the product" },
+    "variant":            { "sql": "pv.title",               "description": "Full variant name, which contains the colour and the size" },
+    "size_label":         { "sql": "REGEXP_SUBSTR(pv.title, '[0-9.]+CM')",
+                            "description": "Shoe size as written, for example '27.5CM'. Empty for products that have no size. Use this to group by size" },
+    "size_cm":            { "sql": "CAST(REPLACE(REGEXP_SUBSTR(pv.title, '[0-9.]+CM'), 'CM', '') AS DECIMAL(5,1))",
+                            "description": "Shoe size in centimetres as a number. Use this to compare sizes, for example smaller than 24" },
+    "unit_price":         { "sql": "pv.price",               "description": "Catalogue price of one unit, in rupees" },
+    "sku":                { "sql": "pv.sku",                 "description": "Stock keeping unit code" },
+    "financial_status":   { "sql": "ds.financial_status",    "description": "Payment state of the orders in this row" },
+    "fulfillment_status": { "sql": "ds.fulfillment_status",  "description": "Shipping state of the orders in this row" },
+    "sale_date":          { "sql": "STR_TO_DATE(CONCAT(ds.year, '-', ds.month, '-', ds.day), '%Y-%m-%d')",
+                            "type": "date",
+                            "description": "The day of the sale. Optional grain: day, week, month, year" }
+  },
+
+  "grains": {
+    "day":   "DATE({})",
+    "week":  "DATE_SUB(DATE({}), INTERVAL WEEKDAY({}) DAY)",
+    "month": "DATE_FORMAT({}, '%Y-%m-01')",
+    "year":  "DATE_FORMAT({}, '%Y-01-01')"
+  },
+
+  "cannotGroupBy": {
+    "product_count": ["product", "sku", "variant"],
+    "variant_count": ["variant", "sku"]
+  }
+}

@@ -1,7 +1,5 @@
 package com.chat.agent.api;
 
-import java.util.Map;
-
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -10,10 +8,13 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.chat.agent.query.DescriptiveQuery;
+import com.chat.agent.dto.AnalyticsResult;
+import com.chat.agent.dto.DescriptiveQuery;
+import com.chat.agent.dto.ErrorResponse;
 import com.chat.agent.query.InvalidQueryException;
 import com.chat.agent.service.AnalyticsService;
 
+/** The structured query API. Same engine as the chat, but you write the JSON yourself. */
 @RestController
 @RequestMapping("/analytics")
 public class AnalyticsController {
@@ -25,17 +26,18 @@ public class AnalyticsController {
     }
 
     @PostMapping("/descriptive")
-    public AnalyticsService.Result descriptive(@RequestBody DescriptiveQuery query) {
+    public AnalyticsResult descriptive(@RequestBody DescriptiveQuery query) {
         return service.run(query);
     }
 
     @ExceptionHandler(InvalidQueryException.class)
-    public ResponseEntity<Map<String, String>> invalidQuery(InvalidQueryException e) {
-        return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+    public ResponseEntity<ErrorResponse> invalidQuery(InvalidQueryException e) {
+        return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
     }
 
     @ExceptionHandler(DataAccessException.class)
-    public ResponseEntity<Map<String, String>> databaseError(DataAccessException e) {
-        return ResponseEntity.internalServerError().body(Map.of("error", "The database could not run this query."));
+    public ResponseEntity<ErrorResponse> databaseError(DataAccessException e) {
+        return ResponseEntity.internalServerError()
+                .body(new ErrorResponse("The database could not run this query."));
     }
 }

@@ -3,6 +3,7 @@ package com.chat.agent.llm;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import com.google.genai.Client;
@@ -11,6 +12,7 @@ import com.google.genai.types.GenerateContentConfig;
 import com.google.genai.types.Part;
 
 @Component
+@ConditionalOnProperty(name = "llm.provider", havingValue = "gemini", matchIfMissing = true)
 public class GeminiClient implements LlmClient {
 
     private final String model;
@@ -23,9 +25,9 @@ public class GeminiClient implements LlmClient {
     }
 
     @Override
-    public String chat(String systemPrompt, List<Message> history) {
+    public String chat(String systemPrompt, List<LlmMessage> history) {
         List<Content> contents = history.stream()
-                .map(m -> Content.builder().role(m.role()).parts(Part.fromText(m.text())).build())
+                .map(m -> Content.builder().role(m.getRole()).parts(Part.fromText(m.getText())).build())
                 .toList();
         GenerateContentConfig config = GenerateContentConfig.builder()
                 .systemInstruction(Content.fromParts(Part.fromText(systemPrompt)))

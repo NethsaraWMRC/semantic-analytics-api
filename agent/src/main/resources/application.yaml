@@ -4,11 +4,37 @@ spring:
 
   profiles:
     active: local
+
+  datasource:
+    url: 
+    username: 
+    password: 
     
   jpa:
     hibernate:
       ddl-auto: none
 
+  # creates the chat_messages table from resources/schema.sql if it is missing
+  sql:
+    init:
+      mode: always
+
+analytics:
+  dataset: shopify_sales
+
 llm:
+  # which provider is active: gemini, claude or groq
+  provider: groq
+
   gemini:
     model: gemini-3.6-flash
+    api-key:
+
+  claude:
+    model: claude-haiku-4-5
+    api-key:
+
+  groq:
+    base-url: https://api.groq.com/openai/v1
+    model: openai/gpt-oss-120b
+    api-key: 

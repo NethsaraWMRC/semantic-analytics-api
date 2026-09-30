@@ -7,11 +7,16 @@ import java.util.Map;
 
 import javax.sql.DataSource;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
 public class AnalyticsRepo {
+
+    private static final Logger log = LoggerFactory.getLogger(AnalyticsRepo.class);
 
     private final JdbcTemplate jdbc;
 
@@ -21,6 +26,16 @@ public class AnalyticsRepo {
     }
 
     public List<Map<String, Object>> query(String sql, List<Object> params) {
+        log.info("analytics SQL: {} | params: {}", sql, params);
+        try {
+            return runQuery(sql, params);
+        } catch (DataAccessException e) {
+            log.error("analytics SQL failed: {} | params: {} | cause: {}", sql, params, rootMessage(e));
+            throw e;
+        }
+    }
+
+    private List<Map<String, Object>> runQuery(String sql, List<Object> params) {
         return jdbc.query(sql, (rs, rowNum) -> {
             ResultSetMetaData meta = rs.getMetaData();
             Map<String, Object> row = new LinkedHashMap<>();
@@ -33,5 +48,13 @@ public class AnalyticsRepo {
             }
             return row;
         }, params.toArray());
+    }
+
+    private static String rootMessage(Throwable e) {
+        Throwable cause = e;
+        while (cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        return cause.getMessage();
     }
 }

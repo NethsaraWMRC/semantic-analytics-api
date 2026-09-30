@@ -2,78 +2,95 @@ package com.chat.agent.query;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import org.springframework.stereotype.Component;
 
-import com.chat.agent.query.DescriptiveQuery.Dimension;
-import com.chat.agent.query.DescriptiveQuery.Filter;
-import com.chat.agent.query.DescriptiveQuery.Sort;
-import com.chat.agent.semantic.SemanticLayer;
+import com.chat.agent.dto.DescriptiveQuery;
+import com.chat.agent.dto.MetricFilter;
+import com.chat.agent.dto.QueryDimension;
+import com.chat.agent.dto.QueryFilter;
+import com.chat.agent.dto.QuerySort;
+import com.chat.agent.dto.TopPerGroup;
+import com.chat.agent.semantic.SemanticModel;
 
-/** Turns an already-validated query into parameterized SQL. Names come from SemanticLayer only; values are bound as ?. */
+/**
+ * Turns an already-validated query into parameterized SQL. Table and column names only ever
+ * come from the semantic model; every value from the request is bound as a ? parameter.
+ *
+ * Only the joins the query actually needs are added, so a question that touches one table
+ * reads one table.
+ */
 @Component
 public class SqlBuilder {
 
-    public record BuiltSql(String sql, List<Object> params) {}
+    public static final String RANK_COLUMN = "rank_in_group";
 
-    public BuiltSql build(DescriptiveQuery q, int limit) {
+    public BuiltSql build(DescriptiveQuery query, SemanticModel model, int limit) {
         List<String> select = new ArrayList<>();
         List<String> groupBy = new ArrayList<>();
         List<String> where = new ArrayList<>();
-        List<String> orderBy = new ArrayList<>();
+        List<String> having = new ArrayList<>();
         List<Object> params = new ArrayList<>();
-        Set<String> joins = new HashSet<>();
+        List<String> usedSql = new ArrayList<>();
+        Map<String, String> dimensionSql = new LinkedHashMap<>();
 
-        for (Dimension d : orEmpty(q.dimensions())) {
-            SemanticLayer.Dimension def = SemanticLayer.DIMENSIONS.get(d.field());
-            String expr = d.grain() == null
-                    ? def.column()
-                    : SemanticLayer.GRAINS.get(d.grain()).formatted(def.column());
-            select.add(expr + " AS " + d.field());
-            groupBy.add(expr);
-            joins.addAll(def.joins());
+        for (QueryDimension dimension : query.getDimensions()) {
+            String column = model.getDimensions().get(dimension.getField()).getSql();
+            usedSql.add(column);
+
+            String expression = dimension.getGrain() == null
+                    ? column
+                    : model.getGrains().get(dimension.getGrain()).replace("{}", column);
+
+            dimensionSql.put(dimension.getField(), expression);
+            select.add(expression + " AS " + dimension.getField());
+            groupBy.add(expression);
         }
 
-        for (String m : q.metrics()) {
-            SemanticLayer.Metric def = SemanticLayer.METRICS.get(m);
-            select.add(def.expr() + " AS " + m);
-            joins.addAll(def.joins());
-        }
+        for (String metric : query.getMetrics()) {
+            String expression = model.metricSql(metric);
+            usedSql.add(expression);
+            select.add(expression + " AS " + metric);
 
-        for (Filter f : orEmpty(q.filters())) {
-            SemanticLayer.Dimension def = SemanticLayer.DIMENSIONS.get(f.field());
-            joins.addAll(def.joins());
-            String col = def.column();
-            switch (f.operator()) {
-                case "in" -> {
-                    List<?> values = (List<?>) f.value();
-                    where.add(col + " IN (" + String.join(",", Collections.nCopies(values.size(), "?")) + ")");
-                    params.addAll(values);
-                }
-                case "between" -> {
-                    List<?> values = (List<?>) f.value();
-                    where.add(col + " BETWEEN ? AND ?");
-                    params.addAll(values);
-                }
-                case "=", "!=", ">", ">=", "<", "<=" -> {
-                    where.add(col + " " + f.operator() + " ?");
-                    params.add(f.value());
-                }
-                default -> throw new IllegalStateException("Unvalidated operator: " + f.operator());
+            if (query.isPercentOfTotal()) {
+                // the window runs after grouping, so SUM(<aggregate>) OVER () is the grand total
+                select.add("ROUND(100.0 * " + expression + " / NULLIF(SUM(" + expression + ") OVER (), 0), 2)"
+                        + " AS " + metric + "_pct");
             }
         }
 
-        for (Sort s : orEmpty(q.sort())) {
-            orderBy.add(s.field() + ("DESC".equalsIgnoreCase(s.direction()) ? " DESC" : " ASC"));
+        // WHERE params come first because WHERE comes first in the statement
+        for (QueryFilter filter : query.getFilters()) {
+            String column = model.getDimensions().get(filter.getField()).getSql();
+            usedSql.add(column);
+            where.add(condition(column, filter, params));
+        }
+
+        for (MetricFilter metricFilter : query.getHaving()) {
+            String expression = model.metricSql(metricFilter.getMetric());
+            usedSql.add(expression);
+            having.add(expression + " " + metricFilter.getOperator() + " ?");
+            params.add(metricFilter.getValue());
+        }
+
+        TopPerGroup topPerGroup = query.getTopPerGroup();
+        if (topPerGroup != null) {
+            select.add("RANK() OVER (PARTITION BY " + dimensionSql.get(topPerGroup.getWithin())
+                    + " ORDER BY " + rankOrder(query, model) + ") AS " + RANK_COLUMN);
+        }
+
+        // two row-multiplying joins in one statement would inflate every sum, so refuse instead
+        if (model.multiplyingJoins(usedSql) > 1) {
+            throw new InvalidQueryException("This combination would need two tables that each have many rows "
+                    + "per order, which would multiply the totals. Please ask for these metrics separately.");
         }
 
         StringBuilder sql = new StringBuilder("SELECT ").append(String.join(", ", select));
-        sql.append(" FROM orders o");
-        for (String join : resolveJoins(joins)) {
+        sql.append(" FROM ").append(model.getBaseTable());
+        for (String join : model.joinsFor(usedSql)) {
             sql.append(" ").append(join);
         }
         if (!where.isEmpty()) {
@@ -82,34 +99,62 @@ public class SqlBuilder {
         if (!groupBy.isEmpty()) {
             sql.append(" GROUP BY ").append(String.join(", ", groupBy));
         }
-        if (!orderBy.isEmpty()) {
-            sql.append(" ORDER BY ").append(String.join(", ", orderBy));
+        if (!having.isEmpty()) {
+            sql.append(" HAVING ").append(String.join(" AND ", having));
         }
+
+        if (topPerGroup != null) {
+            // the rank has to exist before it can be filtered, so the ranked query becomes a subquery
+            sql = new StringBuilder("SELECT * FROM (").append(sql).append(") ranked")
+                    .append(" WHERE ").append(RANK_COLUMN).append(" <= ?")
+                    .append(" ORDER BY ").append(topPerGroup.getWithin()).append(", ").append(RANK_COLUMN);
+            params.add(topPerGroup.getTop());
+        } else {
+            List<String> orderBy = new ArrayList<>();
+            for (QuerySort sort : query.getSort()) {
+                orderBy.add(sort.getField() + direction(sort.getDirection()));
+            }
+            if (!orderBy.isEmpty()) {
+                sql.append(" ORDER BY ").append(String.join(", ", orderBy));
+            }
+        }
+
         sql.append(" LIMIT ?");
         params.add(limit);
 
         return new BuiltSql(sql.toString(), params);
     }
 
-    private List<String> resolveJoins(Set<String> needed) {
-        Set<String> all = new HashSet<>(needed);
-        boolean changed = true;
-        while (changed) {
-            changed = false;
-            for (String name : new ArrayList<>(all)) {
-                changed |= all.addAll(SemanticLayer.JOINS.get(name).requires());
+    private String condition(String column, QueryFilter filter, List<Object> params) {
+        switch (filter.getOperator()) {
+            case "in" -> {
+                List<?> values = (List<?>) filter.getValue();
+                params.addAll(values);
+                return column + " IN (" + String.join(",", Collections.nCopies(values.size(), "?")) + ")";
+            }
+            case "between" -> {
+                List<?> values = (List<?>) filter.getValue();
+                params.addAll(values);
+                return column + " BETWEEN ? AND ?";
+            }
+            default -> {
+                params.add(filter.getValue());
+                return column + " " + filter.getOperator() + " ?";
             }
         }
-        List<String> clauses = new ArrayList<>();
-        for (Map.Entry<String, SemanticLayer.Join> e : SemanticLayer.JOINS.entrySet()) {
-            if (all.contains(e.getKey())) {
-                clauses.add(e.getValue().clause());
-            }
-        }
-        return clauses;
     }
 
-    private static <T> List<T> orEmpty(List<T> list) {
-        return list == null ? List.of() : list;
+    /** Ranks by the sorted metric when there is one, otherwise by the first metric. */
+    private String rankOrder(DescriptiveQuery query, SemanticModel model) {
+        for (QuerySort sort : query.getSort()) {
+            if (model.getMetrics().containsKey(sort.getField())) {
+                return model.metricSql(sort.getField()) + direction(sort.getDirection());
+            }
+        }
+        return model.metricSql(query.getMetrics().get(0)) + " DESC";
+    }
+
+    private String direction(String direction) {
+        return "ASC".equalsIgnoreCase(direction) ? " ASC" : " DESC";
     }
 }

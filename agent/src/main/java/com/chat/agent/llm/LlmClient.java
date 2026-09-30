@@ -2,9 +2,8 @@ package com.chat.agent.llm;
 
 import java.util.List;
 
+/** Any LLM provider. Swap the implementation to change provider; nothing else changes. */
 public interface LlmClient {
 
-    record Message(String role, String text) {} // role: "user" or "model"
-
-    String chat(String systemPrompt, List<Message> history);
+    String chat(String systemPrompt, List<LlmMessage> history);
 }
