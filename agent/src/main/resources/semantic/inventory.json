@@ -1,0 +1,69 @@
+{
+  "dataset": "inventory",
+  "description": "Stock on hand right now, per variant per location. Use this for stock levels, stock value and what is out of stock. It is a snapshot with no history, so it cannot answer questions about a past date or a trend.",
+  "baseTable": "inventory_levels il",
+
+  "tables": {
+    "pv":  { "join": "JOIN product_variants pv ON pv.shopify_variant_id = il.shopify_variant_id" },
+    "p":   { "join": "JOIN products p ON p.shopify_product_id = pv.shopify_product_id" },
+    "loc": { "join": "JOIN inventory_locations loc ON loc.shopify_location_id = il.shopify_location_id" }
+  },
+
+  "metrics": {
+    "available": { "type": "sum", "sql": "il.available_quantity",
+      "description": "Units available to sell right now" },
+
+    "on_hand": { "type": "sum", "sql": "COALESCE(il.on_hand_quantity, 0)",
+      "description": "Units physically in the warehouse, including committed ones" },
+
+    "committed": { "type": "sum", "sql": "COALESCE(il.committed_quantity, 0)",
+      "description": "Units already promised to orders" },
+
+    "incoming": { "type": "sum", "sql": "COALESCE(il.incoming_quantity, 0)",
+      "description": "Units on their way in from suppliers" },
+
+    "reserved": { "type": "sum", "sql": "COALESCE(il.reserved_quantity, 0)",
+      "description": "Units held back and not sellable" },
+
+    "stock_value": { "type": "sum", "sql": "il.available_quantity * COALESCE(pv.unit_cost, 0)",
+      "description": "Value of available stock at cost price" },
+
+    "variant_count": { "type": "count_distinct", "sql": "il.shopify_variant_id",
+      "description": "How many different variants are stocked" },
+
+    "in_stock_variants": { "type": "count_distinct",
+      "sql": "CASE WHEN il.available_quantity > 0 THEN il.shopify_variant_id END",
+      "description": "How many variants have stock available" },
+
+    "out_of_stock_variants": { "type": "count_distinct",
+      "sql": "CASE WHEN il.available_quantity <= 0 THEN il.shopify_variant_id END",
+      "description": "How many variants are out of stock" }
+  },
+
+  "dimensions": {
+    "product":        { "sql": "p.title",          "description": "Product name" },
+    "product_type":   { "sql": "p.product_type",   "description": "Product category as set in Shopify" },
+    "vendor":         { "sql": "p.vendor",         "description": "Brand or supplier of the product" },
+    "product_status": { "sql": "p.status",         "description": "Shopify product status, for example active or archived" },
+    "variant":        { "sql": "pv.title",         "description": "Full variant name, which contains the colour and the size" },
+    "size_label":     { "sql": "REGEXP_SUBSTR(pv.title, '[0-9.]+CM')",
+                        "description": "Shoe size as written, for example '27.5CM'. Empty for products that have no size. Use this to group by size" },
+    "size_cm":        { "sql": "CAST(REPLACE(REGEXP_SUBSTR(pv.title, '[0-9.]+CM'), 'CM', '') AS DECIMAL(5,1))",
+                        "description": "Shoe size in centimetres as a number. Use this to compare sizes, for example smaller than 24" },
+    "unit_price":     { "sql": "pv.price",
+                        "description": "Catalogue price of one unit, in rupees" },
+    "sku":            { "sql": "pv.sku",           "description": "Stock keeping unit code" },
+    "stock_status":   { "sql": "CASE WHEN il.available_quantity > 0 THEN 'In stock' ELSE 'Out of stock' END",
+                        "description": "Either 'In stock' or 'Out of stock' for that variant at that location. Filter on this to find what is out of stock" },
+    "location":       { "sql": "loc.name",         "description": "Warehouse or store holding the stock" },
+    "country":        { "sql": "loc.country_name", "description": "Country of the location" }
+  },
+
+  "grains": {},
+
+  "cannotGroupBy": {
+    "variant_count": ["variant", "sku"],
+    "in_stock_variants": ["variant", "sku"],
+    "out_of_stock_variants": ["variant", "sku"]
+  }
+}

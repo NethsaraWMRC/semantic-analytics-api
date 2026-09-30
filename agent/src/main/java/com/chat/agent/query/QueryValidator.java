@@ -4,125 +4,196 @@ import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
 import org.springframework.stereotype.Component;
 
-import com.chat.agent.query.DescriptiveQuery.Dimension;
-import com.chat.agent.query.DescriptiveQuery.Filter;
-import com.chat.agent.query.DescriptiveQuery.Sort;
-import com.chat.agent.semantic.SemanticLayer;
+import com.chat.agent.dto.DescriptiveQuery;
+import com.chat.agent.dto.MetricFilter;
+import com.chat.agent.dto.QueryDimension;
+import com.chat.agent.dto.QueryFilter;
+import com.chat.agent.dto.QuerySort;
+import com.chat.agent.dto.TopPerGroup;
+import com.chat.agent.semantic.SemanticModel;
 
+/** Rejects anything the semantic model does not allow, before a single line of SQL is built. */
 @Component
 public class QueryValidator {
 
     public static final int MAX_LIMIT = 100;
     private static final int MAX_DIMENSIONS = 3;
     private static final int MAX_IN_VALUES = 50;
+    private static final int MAX_TOP_PER_GROUP = 50;
     private static final Set<String> OPERATORS = Set.of("=", "!=", ">", ">=", "<", "<=", "in", "between");
+    private static final Set<String> NUMERIC_OPERATORS = Set.of("=", "!=", ">", ">=", "<", "<=");
 
-    public void validate(DescriptiveQuery q) {
-        if (!"sales".equals(q.dataset())) {
-            throw fail("Unknown dataset '%s'. Only 'sales' is available.", q.dataset());
-        }
+    public void validate(DescriptiveQuery query, SemanticModel model) {
+        Set<String> dimensionNames = new LinkedHashSet<>();
+        Set<String> sortable = new HashSet<>();
 
-        List<String> metrics = q.metrics() == null ? List.of() : q.metrics();
-        if (metrics.isEmpty()) {
-            throw fail("At least one metric is required. Available metrics: %s", SemanticLayer.METRICS.keySet());
+        if (query.getMetrics().isEmpty()) {
+            throw fail("At least one metric is required. Available metrics: %s", model.getMetrics().keySet());
         }
-        for (String m : metrics) {
-            if (!SemanticLayer.METRICS.containsKey(m)) {
-                throw fail("Unknown metric '%s'. Available metrics: %s", m, SemanticLayer.METRICS.keySet());
+        for (String metric : query.getMetrics()) {
+            if (!model.getMetrics().containsKey(metric)) {
+                throw fail("Unknown metric '%s'. Available metrics: %s", metric, model.getMetrics().keySet());
             }
+            sortable.add(metric);
         }
 
-        List<Dimension> dimensions = q.dimensions() == null ? List.of() : q.dimensions();
-        if (dimensions.size() > MAX_DIMENSIONS) {
+        if (query.getDimensions().size() > MAX_DIMENSIONS) {
             throw fail("At most %d dimensions are allowed.", MAX_DIMENSIONS);
         }
-        Set<String> selected = new HashSet<>(metrics);
-        for (Dimension d : dimensions) {
-            if (d == null || d.field() == null || !SemanticLayer.DIMENSIONS.containsKey(d.field())) {
-                throw fail("Unknown dimension '%s'. Available dimensions: %s",
-                        d == null ? null : d.field(), SemanticLayer.DIMENSIONS.keySet());
-            }
-            if (d.grain() != null) {
-                if (!"order_date".equals(d.field())) {
-                    throw fail("Grain is only supported on 'order_date', not '%s'.", d.field());
-                }
-                if (!SemanticLayer.GRAINS.containsKey(d.grain())) {
-                    throw fail("Unknown grain '%s'. Available grains: %s", d.grain(), SemanticLayer.GRAINS.keySet());
-                }
-            }
-            selected.add(d.field());
-            for (String m : metrics) {
-                if (SemanticLayer.METRICS.get(m).incompatibleDimensions().contains(d.field())) {
-                    throw fail("Metric '%s' cannot be broken down by '%s': the result would be misleading.",
-                            m, d.field());
-                }
-            }
+        for (QueryDimension dimension : query.getDimensions()) {
+            validateDimension(dimension, query.getMetrics(), model);
+            dimensionNames.add(dimension.getField());
+            sortable.add(dimension.getField());
         }
 
-        List<Filter> filters = q.filters() == null ? List.of() : q.filters();
-        for (Filter f : filters) {
-            validateFilter(f);
+        for (QueryFilter filter : query.getFilters()) {
+            validateFilter(filter, model);
         }
 
-        List<Sort> sorts = q.sort() == null ? List.of() : q.sort();
-        for (Sort s : sorts) {
-            if (s == null || s.field() == null || !selected.contains(s.field())) {
-                throw fail("Cannot sort by '%s'. Sort by one of the selected metrics or dimensions: %s",
-                        s == null ? null : s.field(), selected);
-            }
-            if (s.direction() != null && !"ASC".equalsIgnoreCase(s.direction())
-                    && !"DESC".equalsIgnoreCase(s.direction())) {
-                throw fail("Sort direction must be ASC or DESC, got '%s'.", s.direction());
-            }
+        for (MetricFilter metricFilter : query.getHaving()) {
+            validateMetricFilter(metricFilter, model);
         }
 
-        if (q.limit() != null && q.limit() < 1) {
+        for (QuerySort sort : query.getSort()) {
+            validateSort(sort, sortable);
+        }
+
+        if (query.isPercentOfTotal()) {
+            validatePercentOfTotal(query, model);
+        }
+
+        if (query.getTopPerGroup() != null) {
+            validateTopPerGroup(query.getTopPerGroup(), query, dimensionNames);
+        }
+
+        if (query.getCompareTo() != null && !"previous_period".equals(query.getCompareTo())) {
+            throw fail("compareTo only supports 'previous_period', got '%s'.", query.getCompareTo());
+        }
+
+        if (query.getLimit() != null && query.getLimit() < 1) {
             throw fail("Limit must be at least 1.");
         }
     }
 
-    private void validateFilter(Filter f) {
-        if (f == null || f.field() == null || !SemanticLayer.DIMENSIONS.containsKey(f.field())) {
-            throw fail("Cannot filter on '%s'. Filterable fields: %s",
-                    f == null ? null : f.field(), SemanticLayer.DIMENSIONS.keySet());
+    private void validateDimension(QueryDimension dimension, List<String> metrics, SemanticModel model) {
+        if (dimension == null) {
+            throw fail("A dimension entry is empty.");
         }
-        if (f.operator() == null || !OPERATORS.contains(f.operator())) {
-            throw fail("Operator '%s' is not allowed. Allowed operators: %s", f.operator(), OPERATORS);
+        String field = dimension.getField();
+        if (field == null || !model.getDimensions().containsKey(field)) {
+            throw fail("Unknown dimension '%s'. Available dimensions: %s", field, model.getDimensions().keySet());
+        }
+        if (dimension.getGrain() != null && !model.getGrains().containsKey(dimension.getGrain())) {
+            throw fail("Unknown grain '%s'. Available grains: %s", dimension.getGrain(), model.getGrains().keySet());
+        }
+        for (String metric : metrics) {
+            if (model.cannotGroup(metric, field)) {
+                throw fail("Metric '%s' cannot be broken down by '%s': the result would be misleading.", metric, field);
+            }
+        }
+    }
+
+    private void validateFilter(QueryFilter filter, SemanticModel model) {
+        if (filter == null) {
+            throw fail("A filter entry is empty.");
+        }
+        String field = filter.getField();
+        if (field == null || !model.getDimensions().containsKey(field)) {
+            throw fail("Cannot filter on '%s'. Filterable fields: %s", field, model.getDimensions().keySet());
+        }
+        if (filter.getOperator() == null || !OPERATORS.contains(filter.getOperator())) {
+            throw fail("Operator '%s' is not allowed. Allowed operators: %s", filter.getOperator(), OPERATORS);
         }
 
         List<Object> values = new ArrayList<>();
-        switch (f.operator()) {
+        switch (filter.getOperator()) {
             case "in" -> {
-                if (!(f.value() instanceof List<?> list) || list.isEmpty() || list.size() > MAX_IN_VALUES) {
+                if (!(filter.getValue() instanceof List<?> list) || list.isEmpty() || list.size() > MAX_IN_VALUES) {
                     throw fail("Operator 'in' needs a list of 1 to %d values.", MAX_IN_VALUES);
                 }
                 values.addAll(list);
             }
             case "between" -> {
-                if (!(f.value() instanceof List<?> list) || list.size() != 2) {
+                if (!(filter.getValue() instanceof List<?> list) || list.size() != 2) {
                     throw fail("Operator 'between' needs a list of exactly two values.");
                 }
                 values.addAll(list);
             }
-            default -> values.add(f.value());
+            default -> values.add(filter.getValue());
         }
 
-        for (Object v : values) {
-            if (!(v instanceof String || v instanceof Number || v instanceof Boolean)) {
-                throw fail("Filter on '%s' has an invalid value.", f.field());
+        boolean isDate = "date".equals(model.getDimensions().get(field).getType());
+        for (Object value : values) {
+            if (!(value instanceof String || value instanceof Number || value instanceof Boolean)) {
+                throw fail("Filter on '%s' has an invalid value.", field);
             }
-            if ("order_date".equals(f.field())) {
+            if (isDate) {
                 try {
-                    LocalDate.parse(String.valueOf(v));
+                    LocalDate.parse(String.valueOf(value));
                 } catch (DateTimeParseException e) {
-                    throw fail("Filter on 'order_date' needs dates like 2026-08-01, got '%s'.", v);
+                    throw fail("Filter on '%s' needs a date like 2026-08-01 or a period name such as %s, got '%s'.",
+                            field, PeriodResolver.PERIODS, value);
                 }
             }
+        }
+    }
+
+    private void validateMetricFilter(MetricFilter metricFilter, SemanticModel model) {
+        if (metricFilter == null || metricFilter.getMetric() == null
+                || !model.getMetrics().containsKey(metricFilter.getMetric())) {
+            throw fail("Cannot filter on total '%s'. Available metrics: %s",
+                    metricFilter == null ? null : metricFilter.getMetric(), model.getMetrics().keySet());
+        }
+        if (metricFilter.getOperator() == null || !NUMERIC_OPERATORS.contains(metricFilter.getOperator())) {
+            throw fail("Operator '%s' is not allowed on a total. Allowed operators: %s",
+                    metricFilter.getOperator(), NUMERIC_OPERATORS);
+        }
+        if (metricFilter.getValue() == null) {
+            throw fail("Filter on total '%s' needs a number to compare against.", metricFilter.getMetric());
+        }
+    }
+
+    private void validateSort(QuerySort sort, Set<String> sortable) {
+        if (sort == null) {
+            throw fail("A sort entry is empty.");
+        }
+        String field = sort.getField();
+        if (field == null || !sortable.contains(field)) {
+            throw fail("Cannot sort by '%s'. Sort by one of the selected metrics or dimensions: %s", field, sortable);
+        }
+        String direction = sort.getDirection();
+        if (direction != null && !"ASC".equalsIgnoreCase(direction) && !"DESC".equalsIgnoreCase(direction)) {
+            throw fail("Sort direction must be ASC or DESC, got '%s'.", direction);
+        }
+    }
+
+    private void validatePercentOfTotal(DescriptiveQuery query, SemanticModel model) {
+        if (query.getDimensions().isEmpty()) {
+            throw fail("percentOfTotal needs at least one dimension, otherwise every row is 100%%.");
+        }
+        for (String metric : query.getMetrics()) {
+            if (!model.isAdditive(metric)) {
+                throw fail("Metric '%s' cannot be shown as a share of the total, because its values do not add up "
+                        + "across groups.", metric);
+            }
+        }
+    }
+
+    private void validateTopPerGroup(TopPerGroup topPerGroup, DescriptiveQuery query, Set<String> dimensionNames) {
+        if (query.getDimensions().size() < 2) {
+            throw fail("topPerGroup needs two dimensions: the group to split by, and what to rank inside it.");
+        }
+        if (topPerGroup.getWithin() == null || !dimensionNames.contains(topPerGroup.getWithin())) {
+            throw fail("topPerGroup.within must be one of this query's dimensions: %s", dimensionNames);
+        }
+        if (topPerGroup.getTop() == null || topPerGroup.getTop() < 1 || topPerGroup.getTop() > MAX_TOP_PER_GROUP) {
+            throw fail("topPerGroup.top must be between 1 and %d.", MAX_TOP_PER_GROUP);
         }
     }
 

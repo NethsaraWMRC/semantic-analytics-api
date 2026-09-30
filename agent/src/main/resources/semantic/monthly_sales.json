@@ -1,0 +1,52 @@
+{
+  "dataset": "monthly_sales",
+  "description": "Sales already totalled per variant per MONTH. Use this for monthly or yearly trends and month-to-month comparisons. It cannot answer anything about a single day, and has no location, order count or cost. Rows are split by financial_status and fulfillment_status.",
+  "baseTable": "monthly_sales ms",
+
+  "tables": {
+    "pv": { "join": "JOIN product_variants pv ON pv.shopify_variant_id = ms.shopify_variant_id" },
+    "p":  { "join": "JOIN products p ON p.shopify_product_id = pv.shopify_product_id" }
+  },
+
+  "metrics": {
+    "revenue":        { "type": "sum", "sql": "COALESCE(ms.revenue, 0)",           "description": "Sales value after discounts and refunds" },
+    "gross_revenue":  { "type": "sum", "sql": "COALESCE(ms.gross_revenue, 0)",     "description": "Sales value before discounts and refunds" },
+    "discounts":      { "type": "sum", "sql": "COALESCE(ms.total_discounts, 0)",   "description": "Total discount given" },
+    "refunds":        { "type": "sum", "sql": "COALESCE(ms.refunded_amount, 0)",   "description": "Total amount refunded" },
+    "units_sold":     { "type": "sum", "sql": "ms.quantity_sold",                  "description": "Units sold after refunds" },
+    "gross_units":    { "type": "sum", "sql": "COALESCE(ms.gross_quantity, 0)",    "description": "Units ordered before refunds" },
+    "refunded_units": { "type": "sum", "sql": "COALESCE(ms.refunded_quantity, 0)", "description": "Units refunded" },
+
+    "variant_count":  { "type": "count_distinct", "sql": "ms.shopify_variant_id", "description": "How many different variants sold" },
+
+    "average_unit_price": { "type": "ratio", "numerator": "gross_revenue", "denominator": "gross_units",
+      "description": "Average price paid per unit before discounts" }
+  },
+
+  "dimensions": {
+    "product":            { "sql": "p.title",               "description": "Product name" },
+    "product_type":       { "sql": "p.product_type",        "description": "Product category as set in Shopify" },
+    "vendor":             { "sql": "p.vendor",              "description": "Brand or supplier of the product" },
+    "variant":            { "sql": "pv.title",              "description": "Full variant name, which contains the colour and the size" },
+    "size_label":         { "sql": "REGEXP_SUBSTR(pv.title, '[0-9.]+CM')",
+                            "description": "Shoe size as written, for example '27.5CM'. Empty for products that have no size. Use this to group by size" },
+    "size_cm":            { "sql": "CAST(REPLACE(REGEXP_SUBSTR(pv.title, '[0-9.]+CM'), 'CM', '') AS DECIMAL(5,1))",
+                            "description": "Shoe size in centimetres as a number. Use this to compare sizes, for example smaller than 24" },
+    "unit_price":         { "sql": "pv.price",              "description": "Catalogue price of one unit, in rupees" },
+    "sku":                { "sql": "pv.sku",                "description": "Stock keeping unit code" },
+    "financial_status":   { "sql": "ms.financial_status",   "description": "Payment state of the orders in this row" },
+    "fulfillment_status": { "sql": "ms.fulfillment_status", "description": "Shipping state of the orders in this row" },
+    "sale_month":         { "sql": "STR_TO_DATE(CONCAT(ms.year, '-', ms.month, '-01'), '%Y-%m-%d')",
+                            "type": "date",
+                            "description": "The first day of the sales month. Optional grain: month, year" }
+  },
+
+  "grains": {
+    "month": "DATE_FORMAT({}, '%Y-%m-01')",
+    "year":  "DATE_FORMAT({}, '%Y-01-01')"
+  },
+
+  "cannotGroupBy": {
+    "variant_count": ["variant", "sku"]
+  }
+}

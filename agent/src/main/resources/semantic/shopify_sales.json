@@ -1,0 +1,97 @@
+{
+  "dataset": "shopify_sales",
+  "description": "Every individual order line, the most detailed sales data. Use this whenever the question needs orders, average order value, cost, profit, margin, fulfilment location or country. It is the slowest of the sales datasets, so prefer daily_sales or monthly_sales for plain revenue trends.",
+  "baseTable": "order_line_items oli",
+
+  "tables": {
+    "pv":  { "join": "JOIN product_variants pv ON pv.shopify_variant_id = oli.shopify_variant_id" },
+    "p":   { "join": "JOIN products p ON p.shopify_product_id = pv.shopify_product_id" },
+    "loc": { "join": "LEFT JOIN inventory_locations loc ON loc.shopify_location_id = oli.shopify_location_id" }
+  },
+
+  "metrics": {
+    "gross_revenue": { "type": "sum", "sql": "oli.price * oli.quantity",
+      "description": "Sales value before discounts and refunds" },
+
+    "discounts": { "type": "sum", "sql": "COALESCE(oli.total_discount, 0)",
+      "description": "Total discount given" },
+
+    "refunds": { "type": "sum", "sql": "COALESCE(oli.refunded_amount, 0)",
+      "description": "Total amount refunded" },
+
+    "net_revenue": { "type": "sum",
+      "sql": "oli.price * oli.quantity - COALESCE(oli.total_discount, 0) - COALESCE(oli.refunded_amount, 0)",
+      "description": "Sales value after discounts and refunds. This is the usual meaning of revenue" },
+
+    "cost": { "type": "sum", "sql": "COALESCE(oli.unit_cost, 0) * oli.quantity",
+      "description": "Cost of the goods sold" },
+
+    "profit": { "type": "sum",
+      "sql": "oli.price * oli.quantity - COALESCE(oli.total_discount, 0) - COALESCE(oli.refunded_amount, 0) - COALESCE(oli.unit_cost, 0) * oli.quantity",
+      "description": "Net revenue minus cost of goods" },
+
+    "units_sold": { "type": "sum", "sql": "oli.quantity - COALESCE(oli.refunded_quantity, 0)",
+      "description": "Units sold after refunds" },
+
+    "gross_units": { "type": "sum", "sql": "oli.quantity",
+      "description": "Units ordered before refunds" },
+
+    "refunded_units": { "type": "sum", "sql": "COALESCE(oli.refunded_quantity, 0)",
+      "description": "Units refunded" },
+
+    "order_count": { "type": "count_distinct", "sql": "oli.shopify_order_id",
+      "description": "Number of distinct orders" },
+
+    "line_count": { "type": "count", "sql": "oli.id",
+      "description": "Number of order lines" },
+
+    "product_count": { "type": "count_distinct", "sql": "oli.shopify_product_id",
+      "description": "How many different products were sold" },
+
+    "variant_count": { "type": "count_distinct", "sql": "oli.shopify_variant_id",
+      "description": "How many different variants were sold" },
+
+    "average_order_value": { "type": "ratio", "numerator": "net_revenue", "denominator": "order_count",
+      "description": "Net revenue per order. Cannot be broken down by product, variant or sku, because one order can contain several products" },
+
+    "average_unit_price": { "type": "ratio", "numerator": "gross_revenue", "denominator": "gross_units",
+      "description": "Average price paid per unit before discounts" },
+
+    "margin": { "type": "ratio", "numerator": "profit", "denominator": "net_revenue",
+      "description": "Profit as a fraction of net revenue. 0.42 means 42 percent" }
+  },
+
+  "dimensions": {
+    "product":            { "sql": "p.title",              "description": "Product name" },
+    "product_type":       { "sql": "p.product_type",       "description": "Product category as set in Shopify" },
+    "vendor":             { "sql": "p.vendor",             "description": "Brand or supplier of the product" },
+    "product_status":     { "sql": "p.status",             "description": "Shopify product status, for example active or archived" },
+    "variant":            { "sql": "pv.title",             "description": "Full variant name, which contains the colour and the size, for example 'Black/Gold / 27.5CM/9UK/10US/43EUR'" },
+    "size_label":         { "sql": "REGEXP_SUBSTR(pv.title, '[0-9.]+CM')",
+                            "description": "Shoe size as written, for example '27.5CM'. Empty for products that have no size. Use this to group by size" },
+    "size_cm":            { "sql": "CAST(REPLACE(REGEXP_SUBSTR(pv.title, '[0-9.]+CM'), 'CM', '') AS DECIMAL(5,1))",
+                            "description": "Shoe size in centimetres as a number, for example 27.5. Use this to compare sizes, for example smaller than 24" },
+    "unit_price":         { "sql": "oli.price",
+                            "description": "Price of one unit on the order line, in rupees. Use this to filter by price, for example under 15000" },
+    "sku":                { "sql": "oli.sku",              "description": "Stock keeping unit code" },
+    "location":           { "sql": "loc.name",             "description": "Warehouse or store the order was fulfilled from" },
+    "country":            { "sql": "loc.country_name",     "description": "Country of the fulfilling location" },
+    "financial_status":   { "sql": "oli.financial_status", "description": "Payment state, for example paid, pending or refunded" },
+    "fulfillment_status": { "sql": "oli.fulfillment_status", "description": "Shipping state, for example fulfilled or unfulfilled" },
+    "order_date":         { "sql": "oli.order_created_at", "type": "date", "description": "Date the order was placed. Optional grain: day, week, month, year" }
+  },
+
+  "grains": {
+    "day":   "DATE({})",
+    "week":  "DATE_SUB(DATE({}), INTERVAL WEEKDAY({}) DAY)",
+    "month": "DATE_FORMAT({}, '%Y-%m-01')",
+    "year":  "DATE_FORMAT({}, '%Y-01-01')"
+  },
+
+  "cannotGroupBy": {
+    "average_order_value": ["product", "variant", "sku", "product_type", "vendor"],
+    "order_count": [],
+    "product_count": ["product", "sku", "variant"],
+    "variant_count": ["variant", "sku"]
+  }
+}
