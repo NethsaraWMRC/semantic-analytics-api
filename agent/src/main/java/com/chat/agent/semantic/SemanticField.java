@@ -20,4 +20,7 @@ public class SemanticField {
     private String denominator;
 
     private String description;
+
+    /** true when loose user wording should be matched against the real values of this dimension. */
+    private boolean resolve;
 }

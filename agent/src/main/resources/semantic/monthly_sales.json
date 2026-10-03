@@ -24,11 +24,11 @@
   },
 
   "dimensions": {
-    "product":            { "sql": "p.title",               "description": "Product name" },
-    "product_type":       { "sql": "p.product_type",        "description": "Product category as set in Shopify" },
-    "vendor":             { "sql": "p.vendor",              "description": "Brand or supplier of the product" },
+    "product":            { "sql": "p.title", "resolve": true,               "description": "The product's own name, which is what people usually mean when they name an item. Anything that looks like a full item name belongs here, not in vendor." },
+    "product_type":       { "sql": "p.product_type", "resolve": true,        "description": "Product category as set in Shopify" },
+    "vendor":             { "sql": "p.vendor", "resolve": true,              "description": "The brand or manufacturer on its own, never a full item name. If the text has more words than a brand would, it is a product, not a vendor." },
     "variant":            { "sql": "pv.title",              "description": "Full variant name, which contains the colour and the size" },
-    "size_label":         { "sql": "REGEXP_SUBSTR(pv.title, '[0-9.]+CM')",
+    "size_label":         { "sql": "REGEXP_SUBSTR(pv.title, '[0-9.]+CM')", "resolve": true,
                             "description": "Shoe size as written, for example '27.5CM'. Empty for products that have no size. Use this to group by size" },
     "size_cm":            { "sql": "CAST(REPLACE(REGEXP_SUBSTR(pv.title, '[0-9.]+CM'), 'CM', '') AS DECIMAL(5,1))",
                             "description": "Shoe size in centimetres as a number. Use this to compare sizes, for example smaller than 24" },

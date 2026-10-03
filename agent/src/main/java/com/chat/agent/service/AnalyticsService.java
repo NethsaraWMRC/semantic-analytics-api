@@ -17,6 +17,7 @@ import com.chat.agent.query.DateRange;
 import com.chat.agent.query.InvalidQueryException;
 import com.chat.agent.query.PeriodResolver;
 import com.chat.agent.query.QueryValidator;
+import com.chat.agent.query.ValueResolver;
 import com.chat.agent.query.SqlBuilder;
 import com.chat.agent.repository.AnalyticsRepo;
 import com.chat.agent.semantic.SemanticModel;
@@ -30,15 +31,17 @@ public class AnalyticsService {
     private final SqlBuilder builder;
     private final AnalyticsRepo repo;
     private final SemanticRegistry registry;
+    private final ValueResolver valueResolver;
     private final String defaultDataset;
 
     public AnalyticsService(QueryValidator validator, SqlBuilder builder, AnalyticsRepo repo,
-                            SemanticRegistry registry,
+                            SemanticRegistry registry, ValueResolver valueResolver,
                             @Value("${analytics.dataset}") String defaultDataset) {
         this.validator = validator;
         this.builder = builder;
         this.repo = repo;
         this.registry = registry;
+        this.valueResolver = valueResolver;
         this.defaultDataset = defaultDataset;
     }
 
@@ -49,7 +52,12 @@ public class AnalyticsService {
         DateRange period = PeriodResolver.expand(query, model, LocalDate.now());
         validator.validate(query, model);
 
+        // match loose wording against the values that exist; may ask the person to choose
+        List<String> resolverNotes = new ArrayList<>();
+        valueResolver.resolve(query, model, resolverNotes);
+
         AnalyticsResult result = execute(query, model);
+        result.getNotes().addAll(resolverNotes);
 
         if (query.getCompareTo() != null) {
             addComparison(result, query, model, period);
