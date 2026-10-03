@@ -95,6 +95,7 @@ Set `VITE_API_BASE_URL` only when the UI is served from a different host or port
 and remember that doing so needs CORS enabled on the backend. Serving both behind one host
 avoids that entirely.
 
+
 ## Testing without the LLM
 
 `POST /analytics/descriptive` takes the structured query directly, which is the fastest way
