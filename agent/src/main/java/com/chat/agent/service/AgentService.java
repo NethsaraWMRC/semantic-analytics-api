@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.chat.agent.dto.AnalyticsResult;
 import com.chat.agent.dto.ChatTurn;
@@ -21,6 +22,7 @@ import com.chat.agent.entity.ChatMessage;
 import com.chat.agent.llm.LlmClient;
 import com.chat.agent.llm.LlmMessage;
 import com.chat.agent.llm.PromptLoader;
+import com.chat.agent.query.AmbiguousValueException;
 import com.chat.agent.query.InvalidQueryException;
 import com.chat.agent.query.PeriodResolver;
 import com.chat.agent.repository.ChatMessageRepository;
@@ -39,6 +41,9 @@ public class AgentService {
     private static final Logger log = LoggerFactory.getLogger(AgentService.class);
 
     private static final int MAX_ATTEMPTS = 2;
+
+    /** long enough for a follow-up offer, short enough that a table never slips in */
+    private static final int MAX_OFFER_LENGTH = 200;
 
     private static final String PARSE_ERROR =
             "Sorry, I couldn't turn that into a valid query. Could you rephrase the question?";
@@ -95,11 +100,17 @@ public class AgentService {
                 }
                 json = corrected;
                 continue;
+            } catch (AmbiguousValueException e) {
+                // the model cannot fix a name only the person knows, so ask them directly.
+                // answered from code, so a clarification costs no tokens at all.
+                String clarification = e.toUserMessage();
+                save(conversationId, question, clarification, clarification);
+                return clarification;
             } catch (DataAccessException e) {
                 return "Sorry, the database could not run that query.";
             }
 
-            String answer = explain(question, result);
+            String answer = explain(question, query, result);
 
             // the LLM is given the JSON query back as history, so follow-ups build on it;
             // the person sees the written answer
@@ -137,6 +148,11 @@ public class AgentService {
         return summaries;
     }
 
+    @Transactional
+    public void delete(String conversationId) {
+        history.deleteByConversationId(conversationId);
+    }
+
     public List<ChatTurn> messages(String conversationId) {
         List<ChatTurn> turns = new ArrayList<>();
         for (ChatMessage message : history.findByConversationIdOrderByIdAsc(conversationId)) {
@@ -146,10 +162,46 @@ public class AgentService {
         return turns;
     }
 
-    private String explain(String question, AnalyticsResult result) {
+    private String explain(String question, DescriptiveQuery query, AnalyticsResult result) {
         String content = "Question: " + question
+                + "\nWhat was measured: " + summarise(query)
+                + "\nBreakdowns available on this dataset: " + breakdowns(query)
                 + "\nQuery result (JSON): " + mapper.writeValueAsString(result);
         return llm.chat(prompts.get("answer-prompt"), List.of(LlmMessage.user(content)));
+    }
+
+    /**
+     * Dimension names only, never their values. Lets the answer offer a next step that this
+     * dataset can actually deliver, instead of inventing a field that does not exist.
+     */
+    private String breakdowns(DescriptiveQuery query) {
+        String dataset = query.getDataset() == null ? defaultDataset : query.getDataset();
+        return registry.find(dataset)
+                .map(model -> String.join(", ", model.getDimensions().keySet()))
+                .orElse("none");
+    }
+
+    /**
+     * A plain-words version of the query that ran. Without it a follow-up like "the first one"
+     * produces a bare number that nobody can check.
+     */
+    private String summarise(DescriptiveQuery query) {
+        StringBuilder summary = new StringBuilder(String.join(", ", query.getMetrics()));
+
+        if (!query.getDimensions().isEmpty()) {
+            List<String> fields = new ArrayList<>();
+            query.getDimensions().forEach(dimension -> fields.add(dimension.getField()));
+            summary.append(" by ").append(String.join(", ", fields));
+        }
+
+        if (!query.getFilters().isEmpty()) {
+            List<String> conditions = new ArrayList<>();
+            query.getFilters().forEach(filter -> conditions.add(
+                    filter.getField() + " " + filter.getOperator() + " " + filter.getValue()));
+            summary.append(" where ").append(String.join(" and ", conditions));
+        }
+
+        return summary + " (dataset: " + query.getDataset() + ")";
     }
 
     private String explainFailure(String question, String reason) {
@@ -165,9 +217,33 @@ public class AgentService {
 
         List<LlmMessage> conversation = new ArrayList<>();
         for (ChatMessage message : saved) {
-            conversation.add(new LlmMessage(message.getRole(), message.getContent()));
+            conversation.add(new LlmMessage(message.getRole(), forModel(message)));
         }
         return conversation;
+    }
+
+    /**
+     * A model turn is stored as the JSON query, because that is what follow-ups build on.
+     * But the person replied to the words they saw, so a trailing offer like "Want to see each
+     * product's share?" has to travel too, or a bare "yes" has nothing to refer to.
+     */
+    private String forModel(ChatMessage message) {
+        if (!LlmMessage.MODEL.equals(message.getRole())) {
+            return message.getContent();
+        }
+        String offer = trailingQuestion(message.getDisplayText());
+        return offer == null ? message.getContent()
+                : message.getContent() + "\n(You then asked the user: " + offer + ")";
+    }
+
+    /** The last line of the answer when it is a question, which is how the answer prompt ends one. */
+    private String trailingQuestion(String answer) {
+        if (answer == null) {
+            return null;
+        }
+        String[] lines = answer.strip().split("\n");
+        String last = lines[lines.length - 1].strip();
+        return last.endsWith("?") && last.length() <= MAX_OFFER_LENGTH ? last : null;
     }
 
     private void save(String conversationId, String question, String modelContent, String answer) {

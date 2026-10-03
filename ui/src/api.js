@@ -5,7 +5,7 @@ async function request(url, options) {
   if (!response.ok) {
     throw new Error(`Request failed (${response.status})`)
   }
-  return response.json()
+  return response.status === 204 ? null : response.json()
 }
 
 export function listConversations() {
@@ -14,6 +14,10 @@ export function listConversations() {
 
 export function loadMessages(conversationId) {
   return request(`/chat/conversations/${conversationId}`)
+}
+
+export function deleteConversation(conversationId) {
+  return request(`/chat/conversations/${conversationId}`, { method: 'DELETE' })
 }
 
 export function sendMessage(conversationId, message) {

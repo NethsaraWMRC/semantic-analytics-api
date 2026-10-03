@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.chat.agent.dto.AnalyticsResult;
 import com.chat.agent.dto.DescriptiveQuery;
 import com.chat.agent.dto.ErrorResponse;
+import com.chat.agent.query.AmbiguousValueException;
 import com.chat.agent.query.InvalidQueryException;
 import com.chat.agent.service.AnalyticsService;
 
@@ -33,6 +34,11 @@ public class AnalyticsController {
     @ExceptionHandler(InvalidQueryException.class)
     public ResponseEntity<ErrorResponse> invalidQuery(InvalidQueryException e) {
         return ResponseEntity.badRequest().body(new ErrorResponse(e.getMessage()));
+    }
+
+    @ExceptionHandler(AmbiguousValueException.class)
+    public ResponseEntity<ErrorResponse> ambiguousValue(AmbiguousValueException e) {
+        return ResponseEntity.badRequest().body(new ErrorResponse(e.toUserMessage()));
     }
 
     @ExceptionHandler(DataAccessException.class)

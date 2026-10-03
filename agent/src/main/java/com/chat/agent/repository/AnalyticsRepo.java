@@ -35,6 +35,11 @@ public class AnalyticsRepo {
         }
     }
 
+    /** distinct values of one dimension, used to match what the person typed. */
+    public List<String> distinctValues(String sql) {
+        return jdbc.queryForList(sql, String.class);
+    }
+
     private List<Map<String, Object>> runQuery(String sql, List<Object> params) {
         return jdbc.query(sql, (rs, rowNum) -> {
             ResultSetMetaData meta = rs.getMetaData();

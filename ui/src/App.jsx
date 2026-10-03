@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import ChatWindow from './components/ChatWindow.jsx'
 import Sidebar from './components/Sidebar.jsx'
-import { listConversations, loadMessages, sendMessage } from './api.js'
+import { deleteConversation, listConversations, loadMessages, sendMessage } from './api.js'
 
 export default function App() {
   const [conversations, setConversations] = useState([])
@@ -9,6 +9,7 @@ export default function App() {
   const [messages, setMessages] = useState([])
   const [sending, setSending] = useState(false)
   const [error, setError] = useState(null)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
 
   useEffect(() => {
     refreshConversations()
@@ -38,6 +39,18 @@ export default function App() {
     }
   }
 
+  async function removeConversation(id) {
+    try {
+      await deleteConversation(id)
+      setConversations((current) => current.filter((item) => item.conversationId !== id))
+      if (id === conversationId) {
+        startNewChat()
+      }
+    } catch {
+      setError('Could not delete that conversation.')
+    }
+  }
+
   async function send(text) {
     // show the question straight away, so the UI does not feel stuck while the model thinks
     setMessages((current) => [...current, { role: 'user', text }])
@@ -50,8 +63,8 @@ export default function App() {
 
       if (!conversationId) {
         setConversationId(response.conversationId)
-        refreshConversations()
       }
+      refreshConversations()
     } catch {
       setError('The backend did not answer. Check that it is running.')
     } finally {
@@ -60,14 +73,21 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className={sidebarOpen ? 'app' : 'app collapsed'}>
       <Sidebar
         conversations={conversations}
         activeId={conversationId}
         onNewChat={startNewChat}
         onSelect={openConversation}
+        onDelete={removeConversation}
       />
-      <ChatWindow messages={messages} sending={sending} error={error} onSend={send} />
+      <ChatWindow
+        messages={messages}
+        sending={sending}
+        error={error}
+        onSend={send}
+        onToggleSidebar={() => setSidebarOpen((open) => !open)}
+      />
     </div>
   )
 }
