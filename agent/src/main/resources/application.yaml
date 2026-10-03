@@ -19,6 +19,13 @@ spring:
     init:
       mode: always
 
+cors:
+  # Comma-separated origins allowed to call this API from a browser, for example
+  #   allowed-origins: http://localhost:5173,http://your-ec2-host
+  # Leave empty when the UI is served from the same host as the API, which is the case
+  # locally (the Vite proxy) and behind a single nginx. Never use "*".
+  allowed-origins:
+
 analytics:
   dataset: shopify_sales
 
