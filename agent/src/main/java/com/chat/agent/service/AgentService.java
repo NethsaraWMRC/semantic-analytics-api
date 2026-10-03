@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.chat.agent.dto.AnalyticsResult;
 import com.chat.agent.dto.ChatTurn;
@@ -145,6 +146,11 @@ public class AgentService {
             summaries.add(new ConversationSummary(id, titles.getOrDefault(id, "New chat")));
         }
         return summaries;
+    }
+
+    @Transactional
+    public void delete(String conversationId) {
+        history.deleteByConversationId(conversationId);
     }
 
     public List<ChatTurn> messages(String conversationId) {

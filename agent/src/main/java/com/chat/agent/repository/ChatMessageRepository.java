@@ -18,6 +18,8 @@ public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> 
     @Query("select m.conversationId from ChatMessage m group by m.conversationId order by max(m.id) desc")
     List<String> findConversationIds();
 
+    void deleteByConversationId(String conversationId);
+
     /** used to title each conversation by its opening question, without a query per conversation. */
     List<ChatMessage> findByConversationIdInAndRoleOrderByIdAsc(List<String> conversationIds, String role);
 }

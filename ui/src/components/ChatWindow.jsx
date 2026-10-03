@@ -1,9 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import Message from './Message.jsx'
 
-export default function ChatWindow({ messages, sending, error, onSend }) {
+const EXAMPLES = [
+  'What were the best selling products last month?',
+  'Revenue share by product type over the last 30 days',
+  'Top 3 products in each category this quarter',
+  'Which sizes are out of stock right now?',
+]
+
+export default function ChatWindow({ messages, sending, error, onSend, onToggleSidebar }) {
   const [draft, setDraft] = useState('')
   const bottom = useRef(null)
+  const input = useRef(null)
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: 'smooth' })
@@ -11,21 +19,56 @@ export default function ChatWindow({ messages, sending, error, onSend }) {
 
   function submit(event) {
     event.preventDefault()
-    const text = draft.trim()
-    if (!text || sending) {
+    send(draft)
+  }
+
+  function send(text) {
+    const trimmed = text.trim()
+    if (!trimmed || sending) {
       return
     }
     setDraft('')
-    onSend(text)
+    onSend(trimmed)
   }
+
+  // Enter sends, Shift+Enter makes a new line
+  function onKeyDown(event) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      submit(event)
+    }
+  }
+
+  function grow(element) {
+    if (element) {
+      element.style.height = 'auto'
+      element.style.height = `${Math.min(element.scrollHeight, 200)}px`
+    }
+  }
+
+  const empty = messages.length === 0 && !sending
 
   return (
     <main className="chat">
+      <header className="topbar">
+        <button className="icon" onClick={onToggleSidebar} aria-label="Toggle sidebar">
+          ☰
+        </button>
+        <span className="topbar-title">Analytics assistant</span>
+      </header>
+
       <div className="messages">
-        {messages.length === 0 && !sending && (
+        {empty && (
           <div className="welcome">
-            <h1>Ask about your data</h1>
-            <p>For example: “What were the best selling products last month?”</p>
+            <h1>What would you like to know?</h1>
+            <p>Ask about sales, products or stock in plain English.</p>
+            <div className="examples">
+              {EXAMPLES.map((example) => (
+                <button key={example} onClick={() => send(example)}>
+                  {example}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -34,10 +77,13 @@ export default function ChatWindow({ messages, sending, error, onSend }) {
         ))}
 
         {sending && (
-          <div className="message model thinking">
-            <span className="dot" />
-            <span className="dot" />
-            <span className="dot" />
+          <div className="turn model">
+            <div className="avatar">◆</div>
+            <div className="bubble thinking">
+              <span className="dot" />
+              <span className="dot" />
+              <span className="dot" />
+            </div>
           </div>
         )}
 
@@ -47,15 +93,27 @@ export default function ChatWindow({ messages, sending, error, onSend }) {
       </div>
 
       <form className="composer" onSubmit={submit}>
-        <input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="Ask a question about your data"
-          disabled={sending}
-        />
-        <button type="submit" disabled={sending || draft.trim() === ''}>
-          Send
-        </button>
+        <div className="composer-box">
+          <textarea
+            ref={(element) => {
+              input.current = element
+              grow(element)
+            }}
+            rows={1}
+            value={draft}
+            onChange={(event) => {
+              setDraft(event.target.value)
+              grow(event.target)
+            }}
+            onKeyDown={onKeyDown}
+            placeholder="Ask about your data…"
+            disabled={sending}
+          />
+          <button type="submit" disabled={sending || draft.trim() === ''} aria-label="Send">
+            ↑
+          </button>
+        </div>
+        <p className="hint">Answers come from your database. Figures are not forecasts.</p>
       </form>
     </main>
   )
