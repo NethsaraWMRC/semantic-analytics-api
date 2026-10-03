@@ -78,6 +78,23 @@ npm run dev
 
 Open http://localhost:5173. Vite proxies `/chat` to the backend, so there is no CORS setup.
 
+Environment files live in `ui/`. Vite picks one by *mode*, not by server name:
+
+| File | Loaded by | Purpose |
+|---|---|---|
+| `.env` | everything | shared defaults |
+| `.env.development` | `npm run dev` | your machine; uses the dev proxy |
+| `.env.production` | `npm run build` | the files you deploy, EC2 included |
+| `.env.local` | everything, git-ignored | personal overrides |
+
+Note that `development` is Vite's name for the dev server and `production` for a build —
+neither is a claim about which server the files end up on. Deploying to a box you call "dev"
+still uses `.env.production`.
+
+Set `VITE_API_BASE_URL` only when the UI is served from a different host or port than the API,
+and remember that doing so needs CORS enabled on the backend. Serving both behind one host
+avoids that entirely.
+
 
 ## Testing without the LLM
 
