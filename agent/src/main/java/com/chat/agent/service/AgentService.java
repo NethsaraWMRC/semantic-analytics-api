@@ -18,6 +18,8 @@ import com.chat.agent.dto.AnalyticsResult;
 import com.chat.agent.dto.ChatTurn;
 import com.chat.agent.dto.ConversationSummary;
 import com.chat.agent.dto.DescriptiveQuery;
+import com.chat.agent.dto.DiagnosticQuery;
+import com.chat.agent.dto.DiagnosticResult;
 import com.chat.agent.entity.ChatMessage;
 import com.chat.agent.llm.LlmClient;
 import com.chat.agent.llm.LlmMessage;
@@ -51,17 +53,20 @@ public class AgentService {
     private final LlmClient llm;
     private final ChatMessageRepository history;
     private final AnalyticsService analytics;
+    private final DiagnosticService diagnostics;
     private final ObjectMapper mapper;
     private final PromptLoader prompts;
     private final SemanticRegistry registry;
     private final String defaultDataset;
 
     public AgentService(LlmClient llm, ChatMessageRepository history, AnalyticsService analytics,
+                        DiagnosticService diagnostics,
                         ObjectMapper mapper, PromptLoader prompts, SemanticRegistry registry,
                         @Value("${analytics.dataset}") String defaultDataset) {
         this.llm = llm;
         this.history = history;
         this.analytics = analytics;
+        this.diagnostics = diagnostics;
         this.mapper = mapper;
         this.prompts = prompts;
         this.registry = registry;
@@ -79,6 +84,11 @@ public class AgentService {
         if (json == null) {
             save(conversationId, question, reply, reply);
             return reply;
+        }
+
+        // a "why did it change" question goes to a different engine, with its own answer rules
+        if (isDiagnostic(json)) {
+            return runDiagnostic(conversationId, question, json);
         }
 
         // a rejected query gets one more go, with the validator's complaint handed back to the model
@@ -128,6 +138,37 @@ public class AgentService {
 
         log.info("repairing rejected query: {}", reason);
         return extractJson(llm.chat(queryPrompt(), withFeedback));
+    }
+
+    private boolean isDiagnostic(String json) {
+        try {
+            return "diagnostic".equals(mapper.readTree(json).path("type").asString(""));
+        } catch (JacksonException e) {
+            return false;
+        }
+    }
+
+    private String runDiagnostic(String conversationId, String question, String json) {
+        DiagnosticQuery query;
+        try {
+            query = mapper.readValue(json, DiagnosticQuery.class);
+        } catch (JacksonException e) {
+            return PARSE_ERROR;
+        }
+
+        String answer;
+        try {
+            DiagnosticResult result = diagnostics.run(query);
+            answer = llm.chat(prompts.get("diagnostic-prompt"), List.of(LlmMessage.user(
+                    "Question: " + question + "\nBreakdown (JSON): " + mapper.writeValueAsString(result))));
+        } catch (InvalidQueryException e) {
+            answer = explainFailure(question, e.getMessage());
+        } catch (DataAccessException e) {
+            return "Sorry, the database could not run that query.";
+        }
+
+        save(conversationId, question, json, answer);
+        return answer;
     }
 
     public List<ConversationSummary> conversations() {

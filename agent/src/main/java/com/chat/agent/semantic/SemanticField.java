@@ -23,4 +23,7 @@ public class SemanticField {
 
     /** true when loose user wording should be matched against the real values of this dimension. */
     private boolean resolve;
+
+    /** true when a change over time can sensibly be broken down by this dimension. */
+    private boolean explain;
 }
