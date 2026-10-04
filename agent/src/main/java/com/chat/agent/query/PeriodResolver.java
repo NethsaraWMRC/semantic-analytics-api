@@ -23,7 +23,9 @@ public final class PeriodResolver {
     public static final Set<String> PERIODS = new LinkedHashSet<>(List.of(
             "today", "yesterday", "last_7_days", "last_30_days", "last_90_days",
             "this_week", "last_week", "this_month", "last_month",
-            "this_quarter", "last_quarter", "this_year", "last_year"));
+            "this_quarter", "last_quarter", "this_year", "last_year",
+            "last_monday", "last_tuesday", "last_wednesday", "last_thursday",
+            "last_friday", "last_saturday", "last_sunday"));
 
     private PeriodResolver() {
     }
@@ -43,6 +45,13 @@ public final class PeriodResolver {
             case "last_quarter" -> months(firstDayOfQuarter(today).minusMonths(3), 3);
             case "this_year" -> years(today.withDayOfYear(1), 1);
             case "last_year" -> years(today.withDayOfYear(1).minusYears(1), 1);
+            case "last_monday" -> lastWeekday(today, DayOfWeek.MONDAY);
+            case "last_tuesday" -> lastWeekday(today, DayOfWeek.TUESDAY);
+            case "last_wednesday" -> lastWeekday(today, DayOfWeek.WEDNESDAY);
+            case "last_thursday" -> lastWeekday(today, DayOfWeek.THURSDAY);
+            case "last_friday" -> lastWeekday(today, DayOfWeek.FRIDAY);
+            case "last_saturday" -> lastWeekday(today, DayOfWeek.SATURDAY);
+            case "last_sunday" -> lastWeekday(today, DayOfWeek.SUNDAY);
             default -> throw new InvalidQueryException(
                     "Unknown period '" + period + "'. Available periods: " + PERIODS);
         };
@@ -144,6 +153,15 @@ public final class PeriodResolver {
         filter.setOperator(operator);
         filter.setValue(value.toString());
         return filter;
+    }
+
+    /** The most recent day with that name, never today itself. One day, not the week around it. */
+    private static DateRange lastWeekday(LocalDate today, DayOfWeek weekday) {
+        LocalDate day = today.minusDays(1);
+        while (day.getDayOfWeek() != weekday) {
+            day = day.minusDays(1);
+        }
+        return days(day, 1);
     }
 
     private static LocalDate firstDayOfQuarter(LocalDate date) {

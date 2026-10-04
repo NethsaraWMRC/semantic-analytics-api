@@ -22,7 +22,11 @@ import com.chat.agent.semantic.SemanticModel;
 @Component
 public class QueryValidator {
 
+    /** rows returned when the request does not ask for a specific number */
     public static final int MAX_LIMIT = 100;
+
+    /** the most rows an explicit request can ask for, so "show all" is possible but bounded */
+    public static final int HARD_MAX_LIMIT = 1000;
     private static final int MAX_DIMENSIONS = 3;
     private static final int MAX_IN_VALUES = 50;
     private static final int MAX_TOP_PER_GROUP = 50;
@@ -78,6 +82,9 @@ public class QueryValidator {
 
         if (query.getLimit() != null && query.getLimit() < 1) {
             throw fail("Limit must be at least 1.");
+        }
+        if (query.getLimit() != null && query.getLimit() > HARD_MAX_LIMIT) {
+            throw fail("At most %d rows can be returned at once.", HARD_MAX_LIMIT);
         }
     }
 

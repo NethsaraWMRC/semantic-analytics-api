@@ -114,6 +114,11 @@ public class SqlBuilder {
             for (QuerySort sort : query.getSort()) {
                 orderBy.add(sort.getField() + direction(sort.getDirection()));
             }
+            // without an order the database returns rows arbitrarily, and the row cap then keeps
+            // an arbitrary hundred. Biggest first is the useful default.
+            if (orderBy.isEmpty() && !query.getDimensions().isEmpty() && !query.getMetrics().isEmpty()) {
+                orderBy.add(query.getMetrics().get(0) + " DESC");
+            }
             if (!orderBy.isEmpty()) {
                 sql.append(" ORDER BY ").append(String.join(", ", orderBy));
             }
