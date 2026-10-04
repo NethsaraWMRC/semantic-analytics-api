@@ -141,7 +141,9 @@ public class JsonSemanticModel implements SemanticModel {
                 .append(field.getDescription()).append("\n"));
         text.append("\nDIMENSIONS (what can be grouped or filtered by):\n");
         dimensions.forEach((name, field) -> text.append("- ").append(name).append(": ")
-                .append(field.getDescription()).append("\n"));
+                .append(field.getDescription())
+                .append(field.isExplain() ? " [can explain a change]" : "")
+                .append("\n"));
         return text.toString();
     }
 }

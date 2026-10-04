@@ -10,10 +10,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.chat.agent.dto.AnalyticsResult;
 import com.chat.agent.dto.DescriptiveQuery;
+import com.chat.agent.dto.DiagnosticQuery;
+import com.chat.agent.dto.DiagnosticResult;
 import com.chat.agent.dto.ErrorResponse;
 import com.chat.agent.query.AmbiguousValueException;
 import com.chat.agent.query.InvalidQueryException;
 import com.chat.agent.service.AnalyticsService;
+import com.chat.agent.service.DiagnosticService;
 
 /** The structured query API. Same engine as the chat, but you write the JSON yourself. */
 @RestController
@@ -21,14 +24,22 @@ import com.chat.agent.service.AnalyticsService;
 public class AnalyticsController {
 
     private final AnalyticsService service;
+    private final DiagnosticService diagnostics;
 
-    public AnalyticsController(AnalyticsService service) {
+    public AnalyticsController(AnalyticsService service, DiagnosticService diagnostics) {
         this.service = service;
+        this.diagnostics = diagnostics;
     }
 
     @PostMapping("/descriptive")
     public AnalyticsResult descriptive(@RequestBody DescriptiveQuery query) {
         return service.run(query);
+    }
+
+    /** Explains a change: what moved, and which segments account for it. */
+    @PostMapping("/diagnostic")
+    public DiagnosticResult diagnostic(@RequestBody DiagnosticQuery query) {
+        return diagnostics.run(query);
     }
 
     @ExceptionHandler(InvalidQueryException.class)
