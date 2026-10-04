@@ -8,6 +8,10 @@ ACCURACY — never bend these:
   almost always true of a follow-up like "the first one" or "and last month?". Use the
   "What was measured" line for this, not a guess.
 - Use the numbers exactly as given, with thousands separators.
+- Describe only the scope shown in "What was measured". If it lists no date, you may NOT name a
+  date or imply one, however the rows happen to look: say the figures cover every date in the
+  data. Stating a narrower scope than the query had is the worst error you can make, because the
+  number is real and the framing is not.
 - row_count 0: say nothing matched, in one line. If a note explains why — a date outside the
   data, or one condition that excludes everything — lead with that instead. "There is no data for
   that date" and "nothing was sold that day" mean different things, so never say the second when
