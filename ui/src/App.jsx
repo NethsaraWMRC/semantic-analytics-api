@@ -3,13 +3,21 @@ import ChatWindow from './components/ChatWindow.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import { deleteConversation, listConversations, loadMessages, sendMessage } from './api.js'
 
+const MOBILE_WIDTH = 760
+
+function isMobile() {
+  return window.innerWidth <= MOBILE_WIDTH
+}
+
 export default function App() {
   const [conversations, setConversations] = useState([])
   const [conversationId, setConversationId] = useState(null)
   const [messages, setMessages] = useState([])
   const [sending, setSending] = useState(false)
   const [error, setError] = useState(null)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+
+  // on a phone the sidebar is a drawer over the chat, so it starts closed
+  const [sidebarOpen, setSidebarOpen] = useState(() => !isMobile())
 
   useEffect(() => {
     refreshConversations()
@@ -23,15 +31,24 @@ export default function App() {
     }
   }
 
+  // picking something on a phone should get the drawer out of the way
+  function closeOnMobile() {
+    if (isMobile()) {
+      setSidebarOpen(false)
+    }
+  }
+
   function startNewChat() {
     setConversationId(null)
     setMessages([])
     setError(null)
+    closeOnMobile()
   }
 
   async function openConversation(id) {
     setConversationId(id)
     setError(null)
+    closeOnMobile()
     try {
       setMessages(await loadMessages(id))
     } catch {
@@ -44,7 +61,8 @@ export default function App() {
       await deleteConversation(id)
       setConversations((current) => current.filter((item) => item.conversationId !== id))
       if (id === conversationId) {
-        startNewChat()
+        setConversationId(null)
+        setMessages([])
       }
     } catch {
       setError('Could not delete that conversation.')
@@ -80,7 +98,12 @@ export default function App() {
         onNewChat={startNewChat}
         onSelect={openConversation}
         onDelete={removeConversation}
+        onClose={() => setSidebarOpen(false)}
       />
+
+      {/* only visible on a phone: tapping outside the drawer closes it */}
+      <div className="backdrop" onClick={() => setSidebarOpen(false)} />
+
       <ChatWindow
         messages={messages}
         sending={sending}

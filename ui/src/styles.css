@@ -37,8 +37,15 @@ button {
 
 .app {
   display: flex;
+  position: relative;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
+}
+
+/* only ever shown on a phone, behind the open drawer */
+.backdrop {
+  display: none;
 }
 
 /* ====================== sidebar ====================== */
@@ -67,6 +74,19 @@ button {
   font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.2px;
+}
+
+.close-drawer {
+  display: none;
+  margin-left: auto;
+  width: 30px;
+  height: 30px;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 8px;
 }
 
 .logo {
@@ -381,9 +401,14 @@ button {
   color: var(--accent);
 }
 
+.table-scroll {
+  margin: 12px 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .turn.model table {
   width: 100%;
-  margin: 12px 0;
   border-collapse: collapse;
   font-size: 14px;
   background: var(--panel);
@@ -557,19 +582,97 @@ button {
 }
 
 @media (max-width: 760px) {
+  /* the sidebar becomes a drawer sliding over the chat. It must not be in the flex flow,
+     or it squeezes the conversation; and it must sit above the backdrop. */
   .sidebar {
-    position: absolute;
-    z-index: 10;
-    height: 100%;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 280px;
+    max-width: 82vw;
+    margin-left: 0;
+    z-index: 30;
+    transform: translateX(0);
+    transition: transform 0.22s ease;
+  }
+
+  .app.collapsed .sidebar {
+    /* translate, not a negative margin: a fixed element ignores the flow the margin assumed */
+    margin-left: 0;
+    transform: translateX(-100%);
+  }
+
+  .app:not(.collapsed) .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    background: rgba(0, 0, 0, 0.55);
+  }
+
+  .close-drawer {
+    display: block;
+  }
+
+  .topbar {
+    padding: 0 10px;
+  }
+
+  .topbar-title {
+    font-size: 13px;
+  }
+
+  .messages {
+    padding: 18px 12px 4px;
+    gap: 18px;
+  }
+
+  .composer {
+    padding: 8px 12px;
+    /* clears the home bar on phones that have one */
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .composer-box {
+    padding-left: 13px;
+    border-radius: 16px;
+  }
+
+  .hint {
+    display: none;
+  }
+
+  .turn {
+    gap: 9px;
+  }
+
+  .turn.user .bubble {
+    max-width: 88%;
+  }
+
+  .avatar {
+    width: 24px;
+    height: 24px;
+    font-size: 10px;
+  }
+
+  .welcome h1 {
+    font-size: 21px;
+  }
+
+  .welcome p {
+    margin-bottom: 18px;
+    font-size: 14px;
   }
 
   .examples {
     grid-template-columns: 1fr;
   }
 
-  .messages,
-  .composer {
-    padding-left: 14px;
-    padding-right: 14px;
+  .turn.model th,
+  .turn.model td {
+    padding: 7px 10px;
+    white-space: nowrap;
   }
 }

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
-export default function Sidebar({ conversations, activeId, onNewChat, onSelect, onDelete }) {
-  // the id awaiting confirmation, so a stray click cannot wipe a conversation
+export default function Sidebar({ conversations, activeId, onNewChat, onSelect, onDelete, onClose }) {
+  // the id awaiting confirmation, so a stray tap cannot wipe a conversation
   const [confirming, setConfirming] = useState(null)
 
   function askToDelete(event, id) {
@@ -20,6 +20,9 @@ export default function Sidebar({ conversations, activeId, onNewChat, onSelect, 
       <div className="brand">
         <span className="logo">◆</span>
         <span>Analytics</span>
+        <button className="close-drawer" onClick={onClose} aria-label="Close menu">
+          ×
+        </button>
       </div>
 
       <button className="new-chat" onClick={onNewChat}>
