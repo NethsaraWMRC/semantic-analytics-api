@@ -12,7 +12,9 @@ import org.springframework.stereotype.Service;
 import com.chat.agent.dto.AnalyticsResult;
 import com.chat.agent.dto.DescriptiveQuery;
 import com.chat.agent.dto.QueryDimension;
+import com.chat.agent.dto.QueryFilter;
 import com.chat.agent.query.BuiltSql;
+import com.chat.agent.query.DataCoverage;
 import com.chat.agent.query.DateRange;
 import com.chat.agent.query.InvalidQueryException;
 import com.chat.agent.query.PeriodResolver;
@@ -27,21 +29,27 @@ import com.chat.agent.semantic.SemanticRegistry;
 @Service
 public class AnalyticsService {
 
+    /** beyond this many filters, finding the guilty one costs more than it is worth */
+    private static final int MAX_FILTERS_TO_DIAGNOSE = 4;
+
     private final QueryValidator validator;
     private final SqlBuilder builder;
     private final AnalyticsRepo repo;
     private final SemanticRegistry registry;
     private final ValueResolver valueResolver;
+    private final DataCoverage coverage;
     private final String defaultDataset;
 
     public AnalyticsService(QueryValidator validator, SqlBuilder builder, AnalyticsRepo repo,
                             SemanticRegistry registry, ValueResolver valueResolver,
+                            DataCoverage coverage,
                             @Value("${analytics.dataset}") String defaultDataset) {
         this.validator = validator;
         this.builder = builder;
         this.repo = repo;
         this.registry = registry;
         this.valueResolver = valueResolver;
+        this.coverage = coverage;
         this.defaultDataset = defaultDataset;
     }
 
@@ -59,6 +67,18 @@ public class AnalyticsService {
         AnalyticsResult result = execute(query, model);
         result.getNotes().addAll(resolverNotes);
 
+        // a cut-off list makes the visible rows unsafe to add up, so supply the real totals
+        if (result.isTruncated()) {
+            result.setGrandTotals(totalsWithoutGrouping(query, model));
+        }
+
+        // an empty answer is usually a filter that matches nothing, not a true zero
+        if (result.getRowCount() == 0) {
+            explainEmptyResult(query, model, period, result.getNotes());
+        }
+
+        notePartlyEmptyDimensions(result, query);
+
         if (query.getCompareTo() != null) {
             addComparison(result, query, model, period);
         }
@@ -69,7 +89,7 @@ public class AnalyticsService {
     private AnalyticsResult execute(DescriptiveQuery query, SemanticModel model) {
         int limit = query.getLimit() == null
                 ? QueryValidator.MAX_LIMIT
-                : Math.min(query.getLimit(), QueryValidator.MAX_LIMIT);
+                : Math.min(query.getLimit(), QueryValidator.HARD_MAX_LIMIT);
 
         // ask for one row more than we need, so we can tell whether more existed
         BuiltSql built = builder.build(query, model, limit + 1);
@@ -80,8 +100,9 @@ public class AnalyticsService {
             rows = new ArrayList<>(rows.subList(0, limit));
         }
 
-        // only call it truncated when the server's cap did the cutting, not when the user asked for a top N
-        boolean serverCapped = query.getLimit() == null || query.getLimit() > QueryValidator.MAX_LIMIT;
+        // only call it truncated when a cap did the cutting, not when the user asked for a top N
+        boolean serverCapped = query.getLimit() == null
+                || query.getLimit() > QueryValidator.HARD_MAX_LIMIT;
 
         AnalyticsResult result = new AnalyticsResult();
         result.setColumns(columnsOf(query));
@@ -89,6 +110,74 @@ public class AnalyticsService {
         result.setRowCount(rows.size());
         result.setTruncated(moreRowsExist && serverCapped);
         return result;
+    }
+
+    /** The same metrics over the same filters, with no grouping: the honest totals. */
+    private Map<String, Object> totalsWithoutGrouping(DescriptiveQuery query, SemanticModel model) {
+        DescriptiveQuery totals = copyWithoutGrouping(query);
+        List<Map<String, Object>> rows = execute(totals, model).getRows();
+        return rows.isEmpty() ? Map.of() : rows.get(0);
+    }
+
+    /**
+     * Works out why nothing came back. A date outside the data is the common case; otherwise one
+     * filter is doing the eliminating, and naming it is far more use than "no rows".
+     */
+    private void explainEmptyResult(DescriptiveQuery query, SemanticModel model, DateRange period,
+                                    List<String> notes) {
+        DateRange covered = coverage.of(model);
+        if (period != null && covered != null
+                && (period.getStart().isAfter(covered.getEndExclusive())
+                    || period.getEndExclusive().isBefore(covered.getStart()))) {
+            notes.add("The " + model.getDataset() + " data covers " + covered.getStart() + " to "
+                    + covered.getEndExclusive().minusDays(1) + ", and the question asked outside that, "
+                    + "so there is nothing to report rather than nothing happening.");
+            return;
+        }
+
+        List<QueryFilter> filters = query.getFilters();
+        if (filters.size() < 2 || filters.size() > MAX_FILTERS_TO_DIAGNOSE) {
+            return;
+        }
+
+        for (QueryFilter suspect : filters) {
+            DescriptiveQuery without = copyWithoutGrouping(query);
+            List<QueryFilter> rest = new ArrayList<>(filters);
+            rest.remove(suspect);
+            without.setFilters(rest);
+
+            if (!execute(without, model).getRows().isEmpty()) {
+                notes.add("Everything else matches; it is the condition on " + suspect.getField()
+                        + " that leaves nothing. That combination simply does not occur in the data.");
+                return;
+            }
+        }
+    }
+
+    /** A dimension that is blank on most rows usually applies to only part of the data. */
+    private void notePartlyEmptyDimensions(AnalyticsResult result, DescriptiveQuery query) {
+        if (result.getRowCount() == 0) {
+            return;
+        }
+        for (QueryDimension dimension : query.getDimensions()) {
+            long blank = result.getRows().stream()
+                    .filter(row -> row.get(dimension.getField()) == null
+                            || String.valueOf(row.get(dimension.getField())).isBlank())
+                    .count();
+            if (blank * 2 > result.getRowCount()) {
+                result.getNotes().add("Most rows have no " + dimension.getField()
+                        + ", because it is only recorded for part of the data. Narrow the question to "
+                        + "the part that has it rather than reading this as missing data.");
+            }
+        }
+    }
+
+    private DescriptiveQuery copyWithoutGrouping(DescriptiveQuery query) {
+        DescriptiveQuery copy = new DescriptiveQuery();
+        copy.setDataset(query.getDataset());
+        copy.setMetrics(query.getMetrics());
+        copy.setFilters(query.getFilters());
+        return copy;
     }
 
     /** Runs the same query over the period before, and adds the earlier value and the change. */

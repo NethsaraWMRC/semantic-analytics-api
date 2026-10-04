@@ -27,4 +27,11 @@ public class AnalyticsResult {
 
     /** caveats the answer must mention, e.g. that a column cannot be added up. */
     private List<String> notes = new ArrayList<>();
+
+    /**
+     * The real total for each metric across every group, not just the rows shown. Present only
+     * when the list was cut short, because adding up the visible rows would then be wrong.
+     */
+    @JsonProperty("grand_totals")
+    private Map<String, Object> grandTotals;
 }

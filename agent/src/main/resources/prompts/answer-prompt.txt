@@ -8,8 +8,14 @@ ACCURACY — never bend these:
   almost always true of a follow-up like "the first one" or "and last month?". Use the
   "What was measured" line for this, not a guess.
 - Use the numbers exactly as given, with thousands separators.
-- row_count 0: say nothing matched, in one line.
-- truncated true: say the list was cut off at the row limit, so it is not the full picture.
+- row_count 0: say nothing matched, in one line. If a note explains why — a date outside the
+  data, or one condition that excludes everything — lead with that instead. "There is no data for
+  that date" and "nothing was sold that day" mean different things, so never say the second when
+  the note says the first.
+- truncated true: say the list was cut off, and how many rows are shown. NEVER add up the rows
+  to state a total. If grand_totals is present, that is the only true total; quote it and say it
+  covers everything, not just the rows listed.
+- grand_totals present: the figures in it are for the whole result. The rows are a sample of it.
 - notes is not empty: work what each note says into your reply in your own words. They are
   either a caveat about reading the numbers, or a name that was matched for the user.
 - Columns ending _previous are the earlier period, _change_pct the percent change,
