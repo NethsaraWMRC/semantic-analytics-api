@@ -28,6 +28,7 @@ import com.chat.agent.query.AmbiguousValueException;
 import com.chat.agent.query.InvalidQueryException;
 import com.chat.agent.query.PeriodResolver;
 import com.chat.agent.repository.ChatMessageRepository;
+import com.chat.agent.semantic.SemanticModel;
 import com.chat.agent.semantic.SemanticRegistry;
 
 import tools.jackson.core.JacksonException;
@@ -120,6 +121,7 @@ public class AgentService {
                 return "Sorry, the database could not run that query.";
             }
 
+            noteScopeChange(conversation, query, result);
             String answer = explain(question, query, result);
 
             // the LLM is given the JSON query back as history, so follow-ups build on it;
@@ -138,6 +140,64 @@ public class AgentService {
 
         log.info("repairing rejected query: {}", reason);
         return extractJson(llm.chat(queryPrompt(), withFeedback));
+    }
+
+    /**
+     * A follow-up often moves to another dataset, because only that one holds the field asked
+     * for. Dataset coverage differs, and a date filter is easy to lose in the rebuild, so both
+     * changes are reported rather than left for the person to notice in a contradiction.
+     */
+    private void noteScopeChange(List<LlmMessage> conversation, DescriptiveQuery query,
+                                 AnalyticsResult result) {
+        DescriptiveQuery previous = previousQuery(conversation);
+        if (previous == null) {
+            return;
+        }
+
+        String was = datasetOf(previous);
+        String now = datasetOf(query);
+        if (!was.equals(now)) {
+            result.getNotes().add("This answer comes from " + now + ", while the previous one came from "
+                    + was + ". The two hold different records and may not cover the same dates.");
+        }
+
+        if (hasDateFilter(previous) && !hasDateFilter(query)) {
+            result.getNotes().add("The earlier question was limited to a date, and this one is not, "
+                    + "so these figures cover every date in the data.");
+        }
+    }
+
+    /** The most recent structured query in this conversation, or null if there is none. */
+    private DescriptiveQuery previousQuery(List<LlmMessage> conversation) {
+        for (int i = conversation.size() - 1; i >= 0; i--) {
+            LlmMessage message = conversation.get(i);
+            if (!LlmMessage.MODEL.equals(message.getRole())) {
+                continue;
+            }
+            String json = extractJson(message.getText());
+            if (json == null) {
+                continue;
+            }
+            try {
+                return mapper.readValue(json, DescriptiveQuery.class);
+            } catch (JacksonException e) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private boolean hasDateFilter(DescriptiveQuery query) {
+        String dateField = registry.find(datasetOf(query))
+                .map(SemanticModel::dateDimension)
+                .orElse(null);
+        return dateField != null && query.getFilters().stream()
+                .anyMatch(filter -> dateField.equals(filter.getField()));
+    }
+
+    private String datasetOf(DescriptiveQuery query) {
+        return query.getDataset() == null || query.getDataset().isBlank()
+                ? defaultDataset : query.getDataset();
     }
 
     private boolean isDiagnostic(String json) {

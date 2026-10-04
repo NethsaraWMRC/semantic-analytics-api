@@ -125,14 +125,19 @@ public class AnalyticsService {
      */
     private void explainEmptyResult(DescriptiveQuery query, SemanticModel model, DateRange period,
                                     List<String> notes) {
+        // whenever a dated question finds nothing, say what the dataset actually holds: "no data
+        // for that day" and "nothing sold that day" are different answers and must not be mixed up
         DateRange covered = coverage.of(model);
-        if (period != null && covered != null
-                && (period.getStart().isAfter(covered.getEndExclusive())
-                    || period.getEndExclusive().isBefore(covered.getStart()))) {
-            notes.add("The " + model.getDataset() + " data covers " + covered.getStart() + " to "
-                    + covered.getEndExclusive().minusDays(1) + ", and the question asked outside that, "
-                    + "so there is nothing to report rather than nothing happening.");
-            return;
+        if (period != null && covered != null) {
+            boolean outside = period.getStart().isAfter(covered.getEndExclusive())
+                    || period.getEndExclusive().isBefore(covered.getStart());
+            notes.add("The " + model.getDataset() + " data runs from " + covered.getStart() + " to "
+                    + covered.getEndExclusive().minusDays(1) + "."
+                    + (outside ? " The question asked outside that range, so there is nothing to report"
+                               + " rather than nothing having happened." : ""));
+            if (outside) {
+                return;
+            }
         }
 
         List<QueryFilter> filters = query.getFilters();
